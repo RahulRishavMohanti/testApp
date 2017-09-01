@@ -1,0 +1,95 @@
+/*
+   stop and wait protocol
+ */
+
+packet buffer;
+
+
+struct frame
+{  /* frame structure */
+  packet info;
+  int seq;
+  int ack;
+  int kind;
+};
+
+int NextFrameToSend;
+int FrameExpected;
+int PacketLength;
+int waiting;
+
+initialise()
+{
+  NextFrameToSend=0;
+  FrameExpected=0;
+  PacketLength = 0;
+  waiting = FALSE;
+}
+
+/* Main protocol service routine */
+protocol(event)
+     int event;
+{
+  struct frame x,*y;
+
+  switch(event)
+    {
+    case PacketReady :
+      /* a packet has arrived from the network layer */
+      get_packet(&buffer, &PacketLength);
+      x.info = buffer;		/* place packet in frame */
+      x.seq = NextFrameToSend;
+      /* piggyback acknowledge of last frame received */
+      x.ack = 1-FrameExpected;
+      if(channel_idle())
+	{
+	  send_frame(&x, PacketLength); /* send it to physical layer */
+	  start_timer(0, Timer);
+	  waiting = FALSE;
+	}
+      else
+	waiting = TRUE;
+      disable_network_layer();
+      break;
+
+    case FrameArrival :
+      /* a frame has arrived from the physical layer */
+      get_frame(&y);		/* get the frame */
+      /* check that it is the one that is expected */
+      if (y->seq==FrameExpected)
+	{
+	  send_packet(y->info);	/* valid frame */
+	  FrameExpected = 1-FrameExpected;
+	}
+      if(y->ack==NextFrameToSend) /* acknowledgment has arrived */
+	{
+	  enable_network_layer();
+	  NextFrameToSend = 1-NextFrameToSend;
+	}
+      break;
+
+    case TimeOut :
+      /* a frame has not been ACKed in time, */
+      /* so re-send the outstanding frame */
+      x.info = buffer;
+      x.seq = NextFrameToSend;
+      x.ack = 1-FrameExpected;
+      send_frame(&x, PacketLength);
+      start_timer(0, Timer);
+      break;
+
+    case ChannelIdle:
+      if ( waiting )
+	{
+	  x.info = buffer;
+	  x.seq = NextFrameToSend;
+	  x.ack = 1-FrameExpected;
+	  send_frame(&x, PacketLength); /* send it to physical layer */
+	  start_timer(0, Timer);
+	  waiting = FALSE;
+	}
+      break;
+    case CheckSumError :	/* ignored */
+      break;
+    }
+}
